@@ -1,0 +1,215 @@
+import { ArrowLeft, Upload, Download, Loader2, FileDown, Share2, Facebook, Sparkles } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useRef, useState } from "react";
+import imageCompression from "browser-image-compression";
+import { pickSudaneseMessage } from "@/lib/sudaneseLoading";
+import { toast } from "@/hooks/use-toast";
+
+const formatBytes = (b: number) => {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(2)} MB`;
+};
+
+const DataSaver = () => {
+  const navigate = useNavigate();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [original, setOriginal] = useState<File | null>(null);
+  const [originalUrl, setOriginalUrl] = useState<string | null>(null);
+  const [compressed, setCompressed] = useState<File | null>(null);
+  const [compressedUrl, setCompressedUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const handlePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setOriginal(f);
+    setOriginalUrl(URL.createObjectURL(f));
+    setCompressed(null);
+    setCompressedUrl(null);
+    await compress(f);
+  };
+
+  const compress = async (f: File) => {
+    setLoading(true);
+    setMsg(pickSudaneseMessage());
+    try {
+      const out = await imageCompression(f, {
+        maxSizeMB: 0.5,
+        maxWidthOrHeight: 1920,
+        useWebWorker: true,
+        initialQuality: 0.8,
+      });
+      setCompressed(out);
+      setCompressedUrl(URL.createObjectURL(out));
+    } catch (err) {
+      toast({
+        title: "حصل خطأ",
+        description: err instanceof Error ? err.message : "Compression failed",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const download = () => {
+    if (!compressed || !compressedUrl) return;
+    const a = document.createElement("a");
+    a.href = compressedUrl;
+    a.download = `compressed-${compressed.name}`;
+    a.click();
+  };
+
+  const shareFile = async (network: "whatsapp" | "facebook") => {
+    if (!compressed) return;
+    const text =
+      network === "whatsapp"
+        ? "📲 مضغوطة بـ ZoolKaarb — توفير في الباقة!"
+        : "🌍 صورة مضغوطة من ZoolKaarb";
+
+    // Try Web Share API with file (best path — direct app share)
+    try {
+      const navAny = navigator as Navigator & {
+        canShare?: (data: ShareData) => boolean;
+      };
+      if (navAny.canShare && navAny.canShare({ files: [compressed] })) {
+        await navigator.share({ files: [compressed], text, title: "ZoolKaarb" });
+        return;
+      }
+    } catch {
+      /* fall through to deep link */
+    }
+
+    // Fallback: deep link to app (text only — file must be downloaded first)
+    if (network === "whatsapp") {
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+    } else {
+      window.open(
+        `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}&quote=${encodeURIComponent(text)}`,
+        "_blank",
+      );
+    }
+    toast({
+      title: "حمّل الصورة الأول",
+      description: "متصفحك ما بيدعم مشاركة الملف مباشرة — نزّل الصورة وارفعها في التطبيق.",
+    });
+  };
+
+  const savedPct =
+    original && compressed ? Math.max(0, Math.round((1 - compressed.size / original.size) * 100)) : 0;
+
+  return (
+    <div className="min-h-screen bg-background max-w-md mx-auto pb-8">
+      <header className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card/80 backdrop-blur-xl sticky top-0 z-10">
+        <button onClick={() => navigate("/")} className="p-1.5 rounded-xl hover:bg-muted transition-colors">
+          <ArrowLeft className="w-5 h-5 text-foreground" />
+        </button>
+        <div>
+          <h1 className="text-base font-bold font-cairo text-foreground" dir="rtl">موفر البيانات</h1>
+          <p className="text-[10px] text-muted-foreground">Data Saver — Image Compression</p>
+        </div>
+      </header>
+
+      <div className="px-5 mt-5 space-y-4">
+        {!original && (
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="w-full rounded-3xl border-2 border-dashed border-border bg-card p-10 flex flex-col items-center gap-3 active:scale-[0.98] transition-transform"
+          >
+            <div className="w-14 h-14 rounded-2xl bg-gold/20 flex items-center justify-center">
+              <Upload className="w-6 h-6 text-gold" />
+            </div>
+            <p className="text-sm font-semibold text-foreground">Upload an image</p>
+            <p className="text-xs text-muted-foreground font-cairo" dir="rtl">ارفع صورة وانضغطها ليك</p>
+          </button>
+        )}
+
+        {originalUrl && (
+          <div className="rounded-2xl bg-card border border-border overflow-hidden">
+            <img src={compressedUrl ?? originalUrl} alt="preview" className="w-full aspect-square object-contain bg-muted" />
+            <div className="p-4 space-y-3">
+              {original && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Original</span>
+                  <span className="font-semibold text-foreground">{formatBytes(original.size)}</span>
+                </div>
+              )}
+              {compressed && (
+                <>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Compressed</span>
+                    <span className="font-semibold text-gold">{formatBytes(compressed.size)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs pt-2 border-t border-border">
+                    <span className="text-muted-foreground">Saved</span>
+                    <span className="font-bold text-nile">{savedPct}%</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {loading && (
+          <div className="rounded-2xl bg-card border border-border p-5 flex items-center gap-3">
+            <Loader2 className="w-5 h-5 text-gold animate-spin shrink-0" />
+            <p className="text-sm font-cairo text-foreground" dir="rtl">{msg}</p>
+          </div>
+        )}
+
+        {compressed && !loading && (
+          <>
+            <div className="rounded-2xl bg-gradient-to-br from-gold/15 via-card to-nile/10 border border-gold/30 p-4 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl gradient-gold flex items-center justify-center shrink-0">
+                <Sparkles className="w-4 h-4 text-primary-foreground" />
+              </div>
+              <p className="text-xs font-cairo text-foreground leading-relaxed" dir="rtl">
+                الباقة غالية.. ضغطنا ليك الصورة دي عشان تطير في الواتساب بلمحة بصر — وفّرت{" "}
+                <span className="font-bold text-nile">{savedPct}%</span> من حجمها.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => shareFile("whatsapp")}
+                className="rounded-2xl bg-[hsl(142_70%_45%)] text-white py-3.5 font-semibold flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform shadow-md"
+              >
+                <Share2 className="w-5 h-5" />
+                <span className="text-xs font-cairo" dir="rtl">مشاركة فورية للواتساب</span>
+              </button>
+              <button
+                onClick={() => shareFile("facebook")}
+                className="rounded-2xl bg-[hsl(220_70%_50%)] text-white py-3.5 font-semibold flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform shadow-md"
+              >
+                <Facebook className="w-5 h-5" />
+                <span className="text-xs font-cairo" dir="rtl">نشر على فيسبوك</span>
+              </button>
+            </div>
+
+            <button
+              onClick={download}
+              className="w-full rounded-full border border-gold/40 bg-card py-3 text-sm font-semibold text-foreground flex items-center justify-center gap-2 active:scale-95 transition-transform"
+            >
+              <Download className="w-4 h-4 text-gold" /> تحميل الصورة المضغوطة
+            </button>
+          </>
+        )}
+
+        {original && !loading && (
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="w-full rounded-full border border-border py-3 text-sm font-semibold text-foreground flex items-center justify-center gap-2"
+          >
+            <FileDown className="w-4 h-4" /> صورة جديدة
+          </button>
+        )}
+
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePick} />
+      </div>
+    </div>
+  );
+};
+
+export default DataSaver;
